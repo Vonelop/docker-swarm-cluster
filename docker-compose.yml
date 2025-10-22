@@ -1,0 +1,258 @@
+version: '3.8'
+services:
+  # Nginx proxy
+  nginx-proxy:
+    image: "nginx:alpine"
+    ports:
+      - "80:80"
+    depends_on:
+      - gateway-service
+      - session-service
+    volumes:
+      - ./default.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == manager1
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # БД PostgreSQL
+  postgres:
+    image: "postgres:15.1-alpine"
+    # ports:
+    #   - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker1
+    #   resources:
+    #     limits:
+    #       memory: 1024M
+
+  # Очередь сообщений RabbitMQ
+  rabbitmq:
+    image: "rabbitmq:3-management-alpine"
+    # ports:
+    #   - "5672:5672"
+    #   - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker1
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Session Service
+  session-service:
+    image: "vonelop/session-service"
+    # ports:
+    #   - "8081:8081"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: users_db
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker1
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Hotel Service
+  hotel-service:
+    image: "vonelop/hotel-service"
+    # ports:
+    #   - "8082:8082"
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hotels_db
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker2
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Payment Service
+  payment-service:
+    image: "vonelop/payment-service"
+    # ports:
+    #   - "8084:8084"
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: payments_db
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker2
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Loyalty Service
+  loyalty-service:
+    image: "vonelop/loyalty-service"
+    # ports:
+    #   - "8085:8085"
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: balances_db
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker2
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Report Service
+  report-service:
+    image: "vonelop/report-service"
+    # ports:
+    #   - "8086:8086"
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: statistics_db
+      RABBIT_MQ_HOST: rabbitmq
+      RABBIT_MQ_PORT: 5672
+      RABBIT_MQ_USER: guest
+      RABBIT_MQ_PASSWORD: ${RABBITMQ_DEFAULT_PASSWORD}
+      RABBIT_MQ_QUEUE_NAME: messagequeue
+      RABBIT_MQ_EXCHANGE: messagequeue-exchange
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker2
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Booking Service
+  booking-service:
+    image: "vonelop/booking-service"
+    # ports:
+    #   - "8083:8083"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: reservations_db
+      RABBIT_MQ_HOST: rabbitmq
+      RABBIT_MQ_PORT: 5672
+      RABBIT_MQ_USER: guest
+      RABBIT_MQ_PASSWORD: guest
+      RABBIT_MQ_QUEUE_NAME: messagequeue
+      RABBIT_MQ_EXCHANGE: messagequeue-exchange
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker2
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  # Gateway Service
+  gateway-service:
+    image: "vonelop/gateway-service"
+    # ports:
+    #   - "8087:8087"
+    environment:
+      SESSION_SERVICE_HOST: session-service
+      SESSION_SERVICE_PORT: 8081
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      BOOKING_SERVICE_HOST: booking-service
+      BOOKING_SERVICE_PORT: 8083
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+      REPORT_SERVICE_HOST: report-service
+      REPORT_SERVICE_PORT: 8086
+    networks:
+      - app-network
+    # deploy:
+    #   replicas: 1
+    #   placement:
+    #     constraints:
+    #       - node.hostname == worker1
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+networks:
+  app-network:
+    # external: true
+
+volumes:
+  postgres_data:
